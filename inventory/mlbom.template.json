@@ -1,0 +1,23 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "metadata": {
+    "component": {
+      "type": "machine-learning-model",
+      "name": "ticket-clf-v1",
+      "version": "1"
+    }
+  },
+  "components": [
+    {
+      "type": "file",
+      "name": "model.joblib",
+      "hashes": [{ "alg": "SHA-256", "content": "" }]
+    },
+    {
+      "type": "file",
+      "name": "model_card.json",
+      "hashes": [{ "alg": "SHA-256", "content": "" }]
+    }
+  ]
+}

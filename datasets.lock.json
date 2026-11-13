@@ -1,0 +1,7 @@
+{
+  "name": "tickets-v1",
+  "path": "data/tickets.csv",
+  "sha256": "afb7f760bf6f37971a16488aade9fa205bde9bfe08d054c4e813e24624ccd21a",
+  "rows": 50,
+  "schema_version": 1
+}

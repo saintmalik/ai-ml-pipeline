@@ -1,0 +1,8 @@
+# Runtime call inventory for the serve app.
+# Gate: model_id here must match model/model_card.json and /health.
+system: ticket-clf-serve
+calls:
+  - kind: local-pack
+    model_id: ticket-clf-v1
+    path: /model
+    endpoint: POST /predict

@@ -1,0 +1,253 @@
+# Two artifacts (do not conflate):
+#   1) Model pack  → train joblib/card; optionally register/promote to HF Hub (Model Registry)
+#   2) API image   → FastAPI container on GHCR (product container, like a normal app image)
+#
+# Missing HF_TOKEN only skips Hub promote. Train still produced a model; GHCR image still builds.
+# Baked pack in the image is for smoke only. Prod-shaped serve pins a Hub revision.
+name: train-serve
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Dataset digest pin
+        run: |
+          EXPECTED=$(jq -r .sha256 datasets.lock.json)
+          ACTUAL=$(sha256sum data/tickets.csv | awk '{print $1}')
+          echo "expected=$EXPECTED actual=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Install OpenGrep
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash -s -- -v v1.11.0
+          echo "${HOME}/.opengrep/cli/latest" >> "$GITHUB_PATH"
+
+      - name: SAST (OpenGrep)
+        run: |
+          git clone --depth 1 --branch main https://github.com/opengrep/opengrep-rules.git opengrep-rules
+          # Point at rule packs only. Root repo YAML is not a ruleset.
+          opengrep scan \
+            -f opengrep-rules/python \
+            --severity=ERROR \
+            --severity=WARNING \
+            --error \
+            train/ serve/
+
+  train:
+    needs: gates
+    runs-on: ubuntu-latest
+    # Map secret to env so step if: can gate without secrets context (not allowed in steps.if).
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    outputs:
+      dataset_sha256: ${{ steps.pin.outputs.dataset_sha256 }}
+      hf_revision: ${{ steps.register.outputs.revision }}
+      hf_repo_id: ${{ steps.register.outputs.repo_id }}
+      registered: ${{ steps.register.outputs.registered || steps.skip_hub.outputs.registered }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Dataset digest pin
+        id: pin
+        run: |
+          EXPECTED=$(jq -r .sha256 datasets.lock.json)
+          ACTUAL=$(sha256sum data/tickets.csv | awk '{print $1}')
+          test "$ACTUAL" = "$EXPECTED"
+          echo "dataset_sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+
+      - name: Train model pack
+        run: python train/train.py --data data/tickets.csv --out model
+
+      - name: Eval canary
+        run: |
+          python train/eval_canary.py --model model --report out/eval.json
+          jq --arg ds "${{ steps.pin.outputs.dataset_sha256 }}" \
+            '. + {dataset_sha256: $ds}' out/eval.json > out/eval.pinned.json
+          mv out/eval.pinned.json out/eval.json
+          test "$(jq -r .canary_pass out/eval.json)" = "true"
+
+      - name: ML-BOM hash check
+        run: |
+          MODEL_SHA=$(sha256sum model/model.joblib | awk '{print $1}')
+          CARD_SHA=$(sha256sum model/model_card.json | awk '{print $1}')
+          jq --arg m "$MODEL_SHA" --arg c "$CARD_SHA" \
+            '.components[0].hashes[0].content=$m
+             | .components[1].hashes[0].content=$c' \
+            inventory/mlbom.template.json > inventory/mlbom.json
+          test "$(sha256sum model/model.joblib | awk '{print $1}')" = \
+            "$(jq -r '.components[0].hashes[0].content' inventory/mlbom.json)"
+          test "$(sha256sum model/model_card.json | awk '{print $1}')" = \
+            "$(jq -r '.components[1].hashes[0].content' inventory/mlbom.json)"
+
+      # Optional Model Registry promote. Missing secret ≠ skipped train.
+      # Resolve repo id in the expression (not shell) so logs never show REPO_ID="".
+      - name: Register model to HF Hub (optional)
+        id: register
+        if: ${{ env.HF_TOKEN != '' }}
+        env:
+          HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO || format('{0}/ticket-clf', github.repository_owner) }}
+        run: |
+          python train/register_hf.py \
+            --model model \
+            --repo-id "$HF_MODEL_REPO" \
+            --dataset-sha256 "${{ steps.pin.outputs.dataset_sha256 }}"
+          echo "registered=true" >> "$GITHUB_OUTPUT"
+
+      - name: Skip Hub promote (HF_TOKEN not set)
+        id: skip_hub
+        if: ${{ env.HF_TOKEN == '' }}
+        run: |
+          echo "registered=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Hub promote skipped (HF_TOKEN secret not set). Model pack artifact still uploaded; API image build continues."
+
+      - name: Upload model pack artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-pack
+          path: |
+            model/
+            inventory/mlbom.json
+            out/eval.json
+          retention-days: 14
+
+  build-push:
+    needs: train
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download model pack artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-pack
+
+      - name: Image metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "image=${{ env.IMAGE_NAME }}:${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Smoke default: Dockerfile bakes model/ for MODEL_SOURCE=local.
+      # Prod-shaped serve should set MODEL_SOURCE=hub + HF_MODEL_ID + HF_REVISION instead.
+      - name: Build API container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: serve/Dockerfile
+          load: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Software SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.meta.outputs.image }}
+          format: cyclonedx-json
+          output-file: inventory/image-sbom.json
+          upload-artifact: true
+
+      - name: Image SCA (Grype / Anchore)
+        uses: anchore/scan-action@v6
+        with:
+          image: ${{ steps.meta.outputs.image }}
+          fail-build: false
+          severity-cutoff: high
+          output-format: table
+
+      - name: Push API image to GHCR
+        id: push
+        run: |
+          docker push ${{ steps.meta.outputs.image }}
+          docker push ${{ env.IMAGE_NAME }}:latest
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.meta.outputs.image }} | awk -F@ '{print $2}')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "pushed ${{ steps.meta.outputs.image }}@$DIGEST"
+          echo "::notice::API container image pushed to GHCR. This is the product image (FastAPI), not the Model Registry. Model pack promote is the separate HF Hub step."
+
+      - name: Attest API image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  # AI Sec admit gate. Platform deploys the attested image to whatever inference host they run.
+  # We do not pick Fly/Heroku/etc. as the AI runtime.
+  admit:
+    needs: [train, build-push]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Record promote artifacts for platform
+        run: |
+          echo "attested_api_image=${{ needs.build-push.outputs.image }}"
+          echo "attested_api_digest=${{ needs.build-push.outputs.digest }}"
+          echo "model_registered=${{ needs.train.outputs.registered }}"
+          echo "model_repo=${{ needs.train.outputs.hf_repo_id }}"
+          echo "model_revision=${{ needs.train.outputs.hf_revision }}"
+          {
+            echo "## Admit artifacts"
+            echo ""
+            echo "### API container (GHCR)"
+            echo "- Image: \`${{ needs.build-push.outputs.image }}\`"
+            echo "- Digest: \`${{ needs.build-push.outputs.digest }}\`"
+            echo ""
+            echo "### Model pack (registry)"
+            echo "- Hub registered: \`${{ needs.train.outputs.registered }}\`"
+            echo "- Model repo: \`${{ needs.train.outputs.hf_repo_id }}\`"
+            echo "- Model revision: \`${{ needs.train.outputs.hf_revision }}\`"
+            echo ""
+            echo "Platform pulls the attested GHCR digest for the API."
+            echo "Prod-shaped serve pins Hub revision (\`MODEL_SOURCE=hub\` + \`HF_REVISION\`). Baked pack in the image is smoke-only."
+            echo "Inference host is a platform choice. This job only gates admit."
+          } >> "$GITHUB_STEP_SUMMARY"

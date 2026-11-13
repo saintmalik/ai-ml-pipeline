@@ -1,0 +1,51 @@
+text,label
+Cannot login to my account after password reset,auth
+Login page returns 401 with correct password,auth
+Forgot password email never arrives,auth
+SSO redirect loops when signing in,auth
+Two-factor code rejected as invalid,auth
+Session expires every few minutes,auth
+Unable to unlock account after lockout,auth
+Password reset link says it is expired,auth
+Billing charged twice this month,billing
+Invoice PDF download is broken,billing
+Need refund for cancelled subscription,billing
+Upgrade to pro plan failed at checkout,billing
+Credit card on file was charged unexpectedly,billing
+Tax line on invoice looks wrong,billing
+Proration after downgrade is incorrect,billing
+Cannot update payment method in settings,billing
+App crashes when I open the dashboard,bug
+Export CSV button returns empty file,bug
+Dark mode toggle blanks the screen,bug
+Search results are stuck on page one,bug
+Notification badge never clears,bug
+Mobile layout overlaps the sidebar,bug
+Upload fails for files over 5MB,bug
+Webhook deliveries show 500 in logs,bug
+How do I invite a teammate to the workspace,howto
+Where is the API key for integrations,howto
+Steps to rotate my access token,howto
+How do I enable SSO for my org,howto
+Docs for the rate limit headers,howto
+How to export audit logs for compliance,howto
+Where to find webhook signing secret,howto
+Guide for connecting Slack notifications,howto
+Cannot login with Google OAuth,auth
+Password change form rejects special characters,auth
+Account recovery asks for old password,auth
+Billing portal shows wrong currency,billing
+Annual plan renewal reminder is missing,billing
+Failed payment retries every hour,billing
+Chart on reports page renders blank,bug
+Filter chips do not apply to the table,bug
+How do I delete my workspace permanently,howto
+How to set a custom domain for the app,howto
+MFA backup codes were never emailed,auth
+Stripe webhook signature verification fails,billing
+Stack trace appears in the UI toast,bug
+How do I change the default language,howto
+Refresh token revoked after password change,auth
+Duplicate charge after retrying checkout,billing
+Keyboard shortcut opens broken modal,bug
+How to add a read-only viewer seat,howto

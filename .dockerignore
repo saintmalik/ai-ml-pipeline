@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+inventory/mlbom.json
+out/
+.git/

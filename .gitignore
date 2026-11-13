@@ -1,0 +1,10 @@
+.venv/
+model/
+out/
+inventory/mlbom.json
+inventory/sbom.json
+inventory/image-sbom.json
+opengrep-rules/
+__pycache__/
+*.pyc
+.DS_Store
