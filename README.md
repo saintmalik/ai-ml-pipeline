@@ -11,6 +11,8 @@ CPU-friendly lab: **pipeline security gates** for an AI/ML product path (dataset
 
 Hub holds the model revision. GHCR holds the product container. Smoke serve bakes a local pack (`MODEL_SOURCE=local`); prod-shaped serve pins Hub (`MODEL_SOURCE=hub` + `HF_MODEL_ID` + `HF_REVISION`).
 
+**Lab vs work:** this repo uses Actions + HF Hub + GHCR as stand-ins, not the only prod stack. At work: SageMaker or Kubeflow for heavy train, MLflow or SageMaker Model Registry (closest twins to HF Hub here), ECR/GHCR for the API image, platform endpoint for serve. Actions still gates and can kick train.
+
 ## Pipeline
 
 Push to `main` → **gates** → **train** → Hub promote (if secret) → GHCR image + attest → **production** admit (required reviewers).

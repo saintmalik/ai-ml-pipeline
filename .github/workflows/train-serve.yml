@@ -70,7 +70,7 @@ jobs:
       dataset_sha256: ${{ steps.pin.outputs.dataset_sha256 }}
       hf_revision: ${{ steps.register.outputs.revision }}
       hf_repo_id: ${{ steps.register.outputs.repo_id }}
-      registered: ${{ steps.register.outputs.registered || steps.skip_hub.outputs.registered }}
+      registered: ${{ steps.register.outputs.registered || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -106,7 +106,7 @@ jobs:
           python train/gen_mlbom.py --check inventory/mlbom.json --model model
 
       # Optional Model Registry promote. Missing secret ≠ skipped train.
-      # Resolve repo id in the expression (not shell) so logs never show REPO_ID="".
+      # One conditional step (no sibling titled "HF_TOKEN not set" that stays visible when promote ran).
       - name: Register model to HF Hub (optional)
         id: register
         if: ${{ env.HF_TOKEN != '' }}
@@ -119,12 +119,10 @@ jobs:
             --dataset-sha256 "${{ steps.pin.outputs.dataset_sha256 }}"
           echo "registered=true" >> "$GITHUB_OUTPUT"
 
-      - name: Skip Hub promote (HF_TOKEN not set)
-        id: skip_hub
+      - name: Hub promote not configured
         if: ${{ env.HF_TOKEN == '' }}
         run: |
-          echo "registered=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::Hub promote skipped (HF_TOKEN secret not set). Model pack artifact still uploaded; API image build continues."
+          echo "::notice::Hub promote not configured (set repo secret HF_TOKEN to enable). Model pack artifact still uploaded; API image build continues."
 
       - name: Upload model pack artifact
         uses: actions/upload-artifact@v4
