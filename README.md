@@ -51,6 +51,14 @@ python3.12 -m venv .venv
 ```
 
 ```bash
+.venv/bin/python train/gen_mlbom.py --model model --out inventory/mlbom.json
+```
+
+```bash
+.venv/bin/python train/gen_mlbom.py --check inventory/mlbom.json --model model
+```
+
+```bash
 docker build -f serve/Dockerfile -t ticket-clf:local .
 ```
 

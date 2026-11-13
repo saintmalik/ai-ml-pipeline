@@ -100,18 +100,10 @@ jobs:
           mv out/eval.pinned.json out/eval.json
           test "$(jq -r .canary_pass out/eval.json)" = "true"
 
-      - name: ML-BOM hash check
+      - name: ML-BOM generate and check
         run: |
-          MODEL_SHA=$(sha256sum model/model.joblib | awk '{print $1}')
-          CARD_SHA=$(sha256sum model/model_card.json | awk '{print $1}')
-          jq --arg m "$MODEL_SHA" --arg c "$CARD_SHA" \
-            '.components[0].hashes[0].content=$m
-             | .components[1].hashes[0].content=$c' \
-            inventory/mlbom.template.json > inventory/mlbom.json
-          test "$(sha256sum model/model.joblib | awk '{print $1}')" = \
-            "$(jq -r '.components[0].hashes[0].content' inventory/mlbom.json)"
-          test "$(sha256sum model/model_card.json | awk '{print $1}')" = \
-            "$(jq -r '.components[1].hashes[0].content' inventory/mlbom.json)"
+          python train/gen_mlbom.py --model model --out inventory/mlbom.json
+          python train/gen_mlbom.py --check inventory/mlbom.json --model model
 
       # Optional Model Registry promote. Missing secret ≠ skipped train.
       # Resolve repo id in the expression (not shell) so logs never show REPO_ID="".
